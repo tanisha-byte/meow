@@ -224,21 +224,27 @@ app.action('cancel_tool', (args) => onConfirmationButton('declined', args));
 const RAW_DATA_RESPOND_LIMIT = 5; // response_url reuse is capped by Slack; keep this well under it
 app.action('view_raw_data', async ({ action, ack, respond }) => {
   await ack();
-  const rawAcc = getRawData(action.value);
-  if (!rawAcc) {
-    await respond({ replace_original: false, response_type: 'ephemeral', text: "That raw data isn't available anymore (the bot may have restarted since)." });
-    return;
-  }
-  const chunks = splitForSlack(formatRawData(rawAcc));
-  for (const chunk of chunks.slice(0, RAW_DATA_RESPOND_LIMIT)) {
-    await respond({ replace_original: false, response_type: 'ephemeral', text: chunk });
-  }
-  if (chunks.length > RAW_DATA_RESPOND_LIMIT) {
-    await respond({
-      replace_original: false,
-      response_type: 'ephemeral',
-      text: `…truncated ${chunks.length - RAW_DATA_RESPOND_LIMIT} more chunk(s) — the raw data was very large.`,
-    });
+  try {
+    const rawAcc = getRawData(action.value);
+    if (!rawAcc) {
+      await respond({ replace_original: false, response_type: 'ephemeral', text: "That raw data isn't available anymore (the bot may have restarted since)." });
+      return;
+    }
+    const chunks = splitForSlack(formatRawData(rawAcc));
+    for (const chunk of chunks.slice(0, RAW_DATA_RESPOND_LIMIT)) {
+      await respond({ replace_original: false, response_type: 'ephemeral', text: chunk });
+    }
+    if (chunks.length > RAW_DATA_RESPOND_LIMIT) {
+      await respond({
+        replace_original: false,
+        response_type: 'ephemeral',
+        text: `…truncated ${chunks.length - RAW_DATA_RESPOND_LIMIT} more chunk(s) — the raw data was very large.`,
+      });
+    }
+  } catch (err) {
+    // response_url expires ~30min after the message was posted — clicking an
+    // old button 404s here. Nothing to recover; just don't crash the process.
+    console.error('view_raw_data failed:', err.message);
   }
 });
 
