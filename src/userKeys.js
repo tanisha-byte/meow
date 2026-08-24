@@ -8,11 +8,16 @@
 // MVP storage: a local JSON file, gitignored, same trust level as .env.
 // If this bot ever leaves a single trusted machine, swap this for a real
 // secrets store (each value is a live Bolna credential).
+//
+// DATA_DIR must point at a persistent volume when this runs on a platform
+// that rebuilds the filesystem on every deploy (e.g. Railway) — otherwise
+// every FDE's registration is silently wiped on the next `railway up`.
 
 const fs = require('fs');
 const path = require('path');
 
-const FILE = path.join(__dirname, '..', 'data', 'user-bolna-keys.json');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const FILE = path.join(DATA_DIR, 'user-bolna-keys.json');
 
 function loadAll() {
   try {
