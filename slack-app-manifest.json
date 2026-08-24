@@ -1,0 +1,58 @@
+{
+  "display_information": {
+    "name": "Meow",
+    "description": "FDE copilot for Bolna — ask anything, backed by every Bolna MCP tool.",
+    "background_color": "#1a1a1a"
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": false,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "bot_user": {
+      "display_name": "Meow",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/meow",
+        "description": "Ask Meow anything about your Bolna account",
+        "usage_hint": "why did the last call to my test agent fail?",
+        "should_escape": false
+      },
+      {
+        "command": "/meow-connect",
+        "description": "Connect your own Bolna API key (private reply, any channel)",
+        "usage_hint": "bn-... or sa-...",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "chat:write",
+        "commands",
+        "app_mentions:read",
+        "im:history",
+        "im:read",
+        "im:write"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "app_mention",
+        "message.im"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}

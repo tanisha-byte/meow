@@ -1,0 +1,20 @@
+{
+  "name": "switchboard-slack",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Slack bot for Bolna FDEs — Claude reasons freely over every Bolna MCP tool; writes and destructive actions pause for a native Slack confirm dialog.",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "start:forever": "sh scripts/run-forever.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@slack/bolt": "^5.0.0",
+    "dotenv": "^17.2.3"
+  }
+}
