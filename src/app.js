@@ -2,7 +2,7 @@
 
 require('dotenv').config();
 const { App, LogLevel } = require('@slack/bolt');
-const { startTurn, resolveBatchItem } = require('./lib');
+const { startTurn, resolveBatchItem, getRawData, formatRawData } = require('./lib');
 const userKeys = require('./userKeys');
 
 for (const key of ['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'ANTHROPIC_API_KEY', 'BOLNA_API_KEY']) {
@@ -218,6 +218,29 @@ async function onConfirmationButton(decision, { action, ack, respond, body }) {
 
 app.action('run_tool', (args) => onConfirmationButton('confirmed', args));
 app.action('cancel_tool', (args) => onConfirmationButton('declined', args));
+
+// Lets the FDE check any answer against the exact Bolna tool call(s) it was
+// grounded in, instead of trusting Claude's summary of the data.
+const RAW_DATA_RESPOND_LIMIT = 5; // response_url reuse is capped by Slack; keep this well under it
+app.action('view_raw_data', async ({ action, ack, respond }) => {
+  await ack();
+  const rawAcc = getRawData(action.value);
+  if (!rawAcc) {
+    await respond({ replace_original: false, response_type: 'ephemeral', text: "That raw data isn't available anymore (the bot may have restarted since)." });
+    return;
+  }
+  const chunks = splitForSlack(formatRawData(rawAcc));
+  for (const chunk of chunks.slice(0, RAW_DATA_RESPOND_LIMIT)) {
+    await respond({ replace_original: false, response_type: 'ephemeral', text: chunk });
+  }
+  if (chunks.length > RAW_DATA_RESPOND_LIMIT) {
+    await respond({
+      replace_original: false,
+      response_type: 'ephemeral',
+      text: `…truncated ${chunks.length - RAW_DATA_RESPOND_LIMIT} more chunk(s) — the raw data was very large.`,
+    });
+  }
+});
 
 (async () => {
   await app.start();

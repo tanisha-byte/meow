@@ -28,13 +28,20 @@ debugging request. Use Slack mrkdwn (single asterisks for bold, backticks for co
 // ---------- conversation + pending-batch state (single process, in-memory) ----------
 
 const conversations = new Map(); // threadKey -> Anthropic.MessageParam[]
-const pendingBatches = new Map(); // batchId -> { threadKey, channel, threadTs, items: Map, messenger, requesterId, apiKey }
+const pendingBatches = new Map(); // batchId -> { threadKey, channel, threadTs, items: Map, messenger, requesterId, apiKey, rawAcc }
 const threadLocks = new Map(); // threadKey -> Promise (tail of that thread's queue)
+const rawDataStore = new Map(); // rawId -> [{ tool, input, result } | { tool, input, error }]
 
 let batchCounter = 0;
 function nextBatchId() {
   batchCounter += 1;
   return `b${Date.now()}_${batchCounter}`;
+}
+
+let rawCounter = 0;
+function nextRawId() {
+  rawCounter += 1;
+  return `r${Date.now()}_${rawCounter}`;
 }
 
 function threadKeyOf(channel, threadTs) {
@@ -105,6 +112,39 @@ function confirmBlocksFor(batchId, toolUseId, toolDef, input) {
   ];
 }
 
+function rawDataButtonBlocks(rawId) {
+  return [
+    {
+      type: 'actions',
+      elements: [
+        {
+          type: 'button',
+          action_id: 'view_raw_data',
+          value: rawId,
+          text: { type: 'plain_text', text: '🔎 View raw data', emoji: true },
+        },
+      ],
+    },
+  ];
+}
+
+// Renders the exact tool calls (name, args, and the real Bolna response or
+// error) an answer was grounded in — so an FDE can check a number against
+// its source instead of trusting Claude's summary of it.
+function formatRawData(rawAcc) {
+  return rawAcc
+    .map(({ tool, input, result, error }) => {
+      const body = error ? `Error: ${error}` : JSON.stringify(result, null, 2);
+      const args = input && Object.keys(input).length ? `${JSON.stringify(input)}\n` : '';
+      return `*${tool}*\n${args}\`\`\`${body}\`\`\``;
+    })
+    .join('\n\n');
+}
+
+function getRawData(rawId) {
+  return rawDataStore.get(rawId) || null;
+}
+
 // Turns the shared "thinking" bubble into the first real thing Meow has to
 // show (text, or the first confirm card); anything after that just posts as
 // a normal new message. One bubble per user turn, not per Claude round-trip.
@@ -141,13 +181,17 @@ function toolResultBlock(toolUseId, content, isError) {
 // `api_key` argument on every call UNLESS Claude explicitly set one itself
 // (e.g. the FDE asked to act on a specific sub-account) — an explicit
 // Claude-supplied value always wins over the per-user default.
-async function runTool(toolUse, defaultApiKey) {
+// `rawAcc`, if given, collects the real tool name/args/result so the FDE can
+// later check the answer against its actual source via "View raw data".
+async function runTool(toolUse, defaultApiKey, rawAcc) {
   try {
     const args = { ...(toolUse.input || {}) };
     if (!args.api_key && defaultApiKey) args.api_key = defaultApiKey;
     const result = await callBolnaTool(toolUse.name, args);
+    if (rawAcc) rawAcc.push({ tool: toolUse.name, input: toolUse.input, result });
     return toolResultBlock(toolUse.id, result, false);
   } catch (err) {
+    if (rawAcc) rawAcc.push({ tool: toolUse.name, input: toolUse.input, error: err.message });
     return toolResultBlock(toolUse.id, `Error: ${err.message}`, true);
   }
 }
@@ -156,7 +200,7 @@ async function runTool(toolUse, defaultApiKey) {
 // `reveal` resolves the shared "thinking" bubble the first time there's
 // something worth showing; `messenger` handles everything after that.
 // `requesterId`/`apiKey` identify whose Bolna account this turn runs against.
-async function advance(threadKey, channel, threadTs, messenger, reveal, requesterId, apiKey) {
+async function advance(threadKey, channel, threadTs, messenger, reveal, requesterId, apiKey, rawAcc) {
   const messages = getMessages(threadKey);
   const response = await callClaude(messages);
 
@@ -171,6 +215,11 @@ async function advance(threadKey, channel, threadTs, messenger, reveal, requeste
 
   if (toolUses.length === 0) {
     if (!textParts.length) await reveal("(Meow didn't say anything back — try rephrasing?)");
+    if (rawAcc.length) {
+      const rawId = nextRawId();
+      rawDataStore.set(rawId, rawAcc);
+      await reveal(null, rawDataButtonBlocks(rawId));
+    }
     messages.push({ role: 'assistant', content: response.content });
     return;
   }
@@ -179,21 +228,21 @@ async function advance(threadKey, channel, threadTs, messenger, reveal, requeste
   const autoRun = toolUses.filter((tu) => !needsConfirm.includes(tu));
 
   if (needsConfirm.length === 0) {
-    const results = await Promise.all(autoRun.map((tu) => runTool(tu, apiKey)));
+    const results = await Promise.all(autoRun.map((tu) => runTool(tu, apiKey, rawAcc)));
     messages.push({ role: 'assistant', content: response.content });
     messages.push({ role: 'user', content: results });
-    return advance(threadKey, channel, threadTs, messenger, reveal, requesterId, apiKey);
+    return advance(threadKey, channel, threadTs, messenger, reveal, requesterId, apiKey, rawAcc);
   }
 
   // At least one write/danger tool was requested: pause this batch. Run the
   // auto (read) ones now so they're ready the moment confirmations land.
-  const autoResults = await Promise.all(autoRun.map((tu) => runTool(tu, apiKey)));
+  const autoResults = await Promise.all(autoRun.map((tu) => runTool(tu, apiKey, rawAcc)));
   const batchId = nextBatchId();
   const items = new Map();
   for (const tu of autoRun) items.set(tu.id, { toolUse: tu, status: 'auto', result: autoResults[autoRun.indexOf(tu)] });
   for (const tu of needsConfirm) items.set(tu.id, { toolUse: tu, status: 'pending', result: null });
 
-  pendingBatches.set(batchId, { threadKey, channel, threadTs, items, messenger, requesterId, apiKey });
+  pendingBatches.set(batchId, { threadKey, channel, threadTs, items, messenger, requesterId, apiKey, rawAcc });
   messages.push({ role: 'assistant', content: response.content });
 
   for (const tu of needsConfirm) {
@@ -208,7 +257,7 @@ async function startTurn({ channel, threadTs, userText, messenger, requesterId, 
     const messages = getMessages(threadKey);
     messages.push({ role: 'user', content: userText });
     const thinkingMsg = await messenger.post(THINKING_TEXT);
-    await advance(threadKey, channel, threadTs, messenger, makeReveal(messenger, thinkingMsg.ts), requesterId, apiKey);
+    await advance(threadKey, channel, threadTs, messenger, makeReveal(messenger, thinkingMsg.ts), requesterId, apiKey, []);
   });
 }
 
@@ -235,7 +284,7 @@ async function resolveBatchItem(batchId, itemId, decision, clickerId) {
       if (status === 'auto') {
         results.push(result);
       } else if (status === 'confirmed') {
-        results.push(await runTool(toolUse, batch.apiKey));
+        results.push(await runTool(toolUse, batch.apiKey, batch.rawAcc));
       } else {
         results.push(toolResultBlock(toolUse.id, 'The FDE clicked Cancel — this action was not run.', false));
       }
@@ -244,10 +293,10 @@ async function resolveBatchItem(batchId, itemId, decision, clickerId) {
     const messages = getMessages(batch.threadKey);
     messages.push({ role: 'user', content: results });
     const thinkingMsg = await batch.messenger.post(THINKING_TEXT);
-    await advance(batch.threadKey, batch.channel, batch.threadTs, batch.messenger, makeReveal(batch.messenger, thinkingMsg.ts), batch.requesterId, batch.apiKey);
+    await advance(batch.threadKey, batch.channel, batch.threadTs, batch.messenger, makeReveal(batch.messenger, thinkingMsg.ts), batch.requesterId, batch.apiKey, batch.rawAcc);
   });
 
   return decision;
 }
 
-module.exports = { startTurn, resolveBatchItem, threadKeyOf };
+module.exports = { startTurn, resolveBatchItem, threadKeyOf, getRawData, formatRawData };
