@@ -124,7 +124,7 @@ function makeReveal(messenger, thinkingTs) {
 async function callClaude(messages) {
   return anthropic.messages.create({
     model: MODEL,
-    max_tokens: 2048,
+    max_tokens: 8192,
     system: SYSTEM_PROMPT,
     messages,
     tools: CLAUDE_TOOLS,
