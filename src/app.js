@@ -248,7 +248,24 @@ app.action('view_raw_data', async ({ action, ack, respond }) => {
   }
 });
 
+// Free hosts that only offer "web services" (Render's free plan, most PaaS
+// free tiers) require the process to bind $PORT, and spin the service down
+// after ~15 minutes with no inbound request. Socket Mode has no inbound HTTP
+// of its own, so expose a tiny health endpoint: it satisfies the port check
+// and gives an external pinger something to hit to keep the service awake.
+// Locally $PORT is unset and none of this runs.
+function startHealthEndpoint() {
+  if (!process.env.PORT) return;
+  require('http')
+    .createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('meow ok\n');
+    })
+    .listen(process.env.PORT, () => console.log(`Health endpoint listening on :${process.env.PORT}`));
+}
+
 (async () => {
   await app.start();
+  startHealthEndpoint();
   console.log('⚡️ Meow is running (Socket Mode).');
 })();

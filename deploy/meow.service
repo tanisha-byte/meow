@@ -1,0 +1,46 @@
+[Unit]
+Description=Meow — Slack copilot for Bolna FDEs
+Documentation=https://github.com/bolna-ai
+After=network-online.target
+Wants=network-online.target
+
+# src/app.js deliberately exits on any unhandled rejection or uncaught
+# exception, so that a fresh process replaces a half-connected socket rather
+# than sitting there silently dead. systemd's default start-limit would treat
+# a burst of those (a wifi drop, a Slack outage) as a crash loop and give up
+# permanently — which is exactly the failure this service is meant to survive.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=meow
+Group=meow
+WorkingDirectory=/opt/meow
+ExecStart=/usr/bin/node src/app.js
+Restart=always
+RestartSec=3
+
+# Secrets live in /opt/meow/.env (mode 600, owned by meow) rather than being
+# baked into this unit, so `systemctl cat meow` never prints a live token.
+EnvironmentFile=/opt/meow/.env
+Environment=NODE_ENV=production
+Environment=DATA_DIR=/opt/meow/data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=meow
+
+# This process holds live Bolna API keys for every registered FDE, so give it
+# the narrowest view of the box that still lets it run: the data directory is
+# the only writable path it needs.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/opt/meow/data
+
+[Install]
+WantedBy=multi-user.target

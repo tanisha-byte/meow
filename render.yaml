@@ -1,0 +1,33 @@
+# Render blueprint — free plan, no credit card.
+#
+# Meow talks to Slack over Socket Mode (an outbound websocket), so it needs no
+# inbound traffic to do its job. Render only offers always-on processes on paid
+# plans, so this runs as a free "web service" instead: src/app.js binds $PORT
+# with a health endpoint purely to satisfy that, and an external pinger keeps
+# the service from spinning down. See deploy/README.md.
+services:
+  - type: web
+    name: meow
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install --omit=dev
+    startCommand: node src/app.js
+    healthCheckPath: /
+    envVars:
+      # sync: false means "prompt me, never store it in git" — these are live
+      # credentials and must only ever exist in the Render dashboard.
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: BOLNA_API_KEY
+        sync: false
+      # Baseline FDE registrations. Render's free disk is wiped on every
+      # restart, so without this everyone would have to re-run /meow-connect.
+      - key: USER_KEYS_JSON
+        sync: false
+      - key: NODE_VERSION
+        value: "22"

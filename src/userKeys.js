@@ -19,11 +19,32 @@ const path = require('path');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const FILE = path.join(DATA_DIR, 'user-bolna-keys.json');
 
-function loadAll() {
+// Free hosts give you an ephemeral filesystem: every restart and every deploy
+// wipes the data directory, which would silently log out every registered FDE
+// and leave them staring at the "you haven't connected your account" reply.
+// USER_KEYS_JSON is a baseline read at boot so the known registrations survive
+// a restart even though the file does not. Anyone who runs /meow-connect after
+// that persists only until the next restart — copy their entry into the env
+// var to make it durable. On a box with a real disk, leave USER_KEYS_JSON
+// unset and this is a no-op.
+function seedFromEnv() {
+  if (!process.env.USER_KEYS_JSON) return {};
   try {
-    return JSON.parse(fs.readFileSync(FILE, 'utf8'));
-  } catch {
+    return JSON.parse(process.env.USER_KEYS_JSON);
+  } catch (err) {
+    console.error('USER_KEYS_JSON is not valid JSON, ignoring it:', err.message);
     return {};
+  }
+}
+
+// The on-disk file wins over the seed, so a fresh /meow-connect always beats a
+// stale env var for the same user.
+function loadAll() {
+  const seed = seedFromEnv();
+  try {
+    return { ...seed, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) };
+  } catch {
+    return seed;
   }
 }
 
