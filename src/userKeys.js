@@ -69,4 +69,12 @@ function removeKey(slackUserId) {
   saveAll(all);
 }
 
-module.exports = { setKey, getKey, removeKey };
+// Number of registrations visible right now (env seed plus anything on disk).
+// app.js logs this at boot: a misconfigured USER_KEYS_JSON otherwise stays
+// invisible until the first FDE messages Meow and silently gets told to
+// reconnect, which looks exactly like the bot being broken.
+function count() {
+  return Object.keys(loadAll()).length;
+}
+
+module.exports = { setKey, getKey, removeKey, count };

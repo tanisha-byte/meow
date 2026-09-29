@@ -268,4 +268,13 @@ function startHealthEndpoint() {
   await app.start();
   startHealthEndpoint();
   console.log('⚡️ Meow is running (Socket Mode).');
+
+  // Surfaces a bad USER_KEYS_JSON at boot rather than at the moment an FDE
+  // first asks Meow something. Zero on a host with an ephemeral disk means
+  // every registration is gone and everyone will be told to reconnect.
+  const known = userKeys.count();
+  console.log(`${known} registered user(s) known at boot.`);
+  if (known === 0) {
+    console.warn('No registered users. On an ephemeral host, check that USER_KEYS_JSON is the full JSON object from data/user-bolna-keys.json.');
+  }
 })();
